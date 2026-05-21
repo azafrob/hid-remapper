@@ -109,8 +109,8 @@ char const* string_desc_arr[] = {
 //#else
 //    "RP2040",  // 1: Manufacturer
 //#endif
-    "Logitech",  // 1: Manufacturer (Antes "RP2040")
-    "USB Keyboard", // 2: Product (Antes "HID Remapper XXXX")
+    "Logitech",  // 1: Manufacturer
+    "USB Keyboard", // 2: Product
     "2021M56789" // 3: Serial Number
 };
 
