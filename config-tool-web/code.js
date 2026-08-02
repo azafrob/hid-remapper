@@ -17,6 +17,8 @@ const DEFAULT_TAP_HOLD_THRESHOLD = 200000;
 const DEFAULT_GPIO_DEBOUNCE_TIME = 5;
 const DEFAULT_SCALING = 1000;
 const DEFAULT_MACRO_ENTRY_DURATION = 1;
+const THEME_STORAGE_KEY = 'hid-remapper-theme';
+const DEFAULT_THEME = 'light';
 
 const NLAYERS = 8;
 const NMACROS = 32;
@@ -213,6 +215,8 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("input_labels_modal_dropdown").addEventListener("change", input_labels_onchange("input_labels_modal_dropdown"));
     document.getElementById("ignore_auth_dev_inputs_checkbox").addEventListener("change", ignore_auth_dev_inputs_onchange);
     document.getElementById("normalize_gamepad_inputs_checkbox").addEventListener("change", normalize_gamepad_inputs_onchange);
+    document.getElementById("theme_dropdown").addEventListener("change", theme_onchange);
+    apply_theme(get_theme_preference());
 
     document.getElementById("nav-monitor-tab").addEventListener("shown.bs.tab", monitor_tab_shown);
     document.getElementById("nav-monitor-tab").addEventListener("hide.bs.tab", monitor_tab_hide);
@@ -619,6 +623,32 @@ async function get_usages_from_device() {
         await do_get_usages_from_device(GET_OUR_USAGES, our_usage_count);
     extra_usages['source'] =
         await do_get_usages_from_device(GET_THEIR_USAGES, their_usage_count);
+}
+
+function get_theme_preference() {
+    let theme = DEFAULT_THEME;
+    try {
+        theme = localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME;
+    } catch (e) {
+        // Ignore browsers that block local storage.
+    }
+    return ['light', 'dark'].includes(theme) ? theme : DEFAULT_THEME;
+}
+
+function apply_theme(theme) {
+    theme = ['light', 'dark'].includes(theme) ? theme : DEFAULT_THEME;
+    document.body.classList.toggle('dark-mode', theme == 'dark');
+    document.getElementById('theme_dropdown').value = theme;
+}
+
+function theme_onchange() {
+    const theme = document.getElementById('theme_dropdown').value;
+    apply_theme(theme);
+    try {
+        localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch (e) {
+        // Ignore browsers that block local storage.
+    }
 }
 
 function set_config_ui_state() {
