@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <vector>
 
+#include "press_modes.h"
+
 enum class ConfigCommand : int8_t {
     NO_COMMAND = 0,
     RESET_INTO_BOOTSEL = 1,
@@ -112,12 +114,14 @@ enum class Op : int8_t {
     PREV_INPUT_STATE_SCALED = 52,
     DEADZONE = 53,
     DEADZONE2 = 54,
+    DOUBLE_TAP_STATE = 55,
 };
 
 struct tap_hold_state_t {
     bool tap : 1;
     bool hold : 1;
     bool prev_hold : 1;
+    bool double_tap : 1;
 };
 
 struct expr_elem_t {
@@ -136,6 +140,7 @@ struct map_source_t {
     bool sticky = false;
     bool tap = false;
     bool hold = false;
+    bool double_tap = false;
     bool is_relative = false;
     bool is_binary = false;
     uint8_t orig_source_port = 0;
@@ -168,13 +173,18 @@ struct reverse_mapping_t {
 struct tap_hold_usage_t {
     int32_t* input_state;
     tap_hold_state_t* tap_hold_state;
-    uint64_t pressed_at;
+    double_tap_tracker_t double_tap_tracker;
+    bool double_tap_enabled = false;
 };
 
 struct sticky_usage_t {
     int32_t* input_state;
+    tap_hold_state_t* tap_hold_state;
     uint8_t* sticky_state;
     uint8_t layer_mask;
+    uint8_t tap_layer_mask;
+    uint8_t hold_layer_mask;
+    uint8_t double_tap_layer_mask;
 };
 
 struct tap_hold_sticky_usage_t {
@@ -312,7 +322,9 @@ typedef persist_config_v12_t persist_config_v13_t;
 
 typedef persist_config_v13_t persist_config_v18_t;
 
-typedef persist_config_v18_t persist_config_t;
+typedef persist_config_v18_t persist_config_v19_t;
+
+typedef persist_config_v19_t persist_config_t;
 
 struct __attribute__((packed)) get_config_t {
     uint8_t version;

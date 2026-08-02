@@ -7,8 +7,9 @@ const REPORT_ID_MONITOR = 101;
 const STICKY_FLAG = 1 << 0;
 const TAP_FLAG = 1 << 1;
 const HOLD_FLAG = 1 << 2;
+const DOUBLE_TAP_FLAG = 1 << 3;
 const CONFIG_SIZE = 32;
-const CONFIG_VERSION = 18;
+const CONFIG_VERSION = 19;
 const VENDOR_ID = 0xCAFE;
 const PRODUCT_ID = 0xBAF2;
 const DEFAULT_PARTIAL_SCROLL_TIMEOUT = 1000000;
@@ -89,6 +90,7 @@ const ops = {
     "STICKY_STATE": 21,
     "TAP_STATE": 22,
     "HOLD_STATE": 23,
+    "DOUBLE_TAP_STATE": 55,
     "BITWISE_OR": 24,
     "BITWISE_AND": 25,
     "BITWISE_NOT": 26,
@@ -155,6 +157,7 @@ let config = {
         'sticky': false,
         'tap': false,
         'hold': false,
+        'double_tap': false,
         'scaling': DEFAULT_SCALING,
         'source_port': 0,
         'target_port': 0,
@@ -319,6 +322,7 @@ async function load_from_device() {
                 'sticky': (mapping_flags & STICKY_FLAG) != 0,
                 'tap': (mapping_flags & TAP_FLAG) != 0,
                 'hold': (mapping_flags & HOLD_FLAG) != 0,
+                'double_tap': (mapping_flags & DOUBLE_TAP_FLAG) != 0,
                 'source_port': hub_ports & 0x0F,
                 'target_port': (hub_ports >> 4) & 0x0F,
             });
@@ -463,7 +467,8 @@ async function save_to_device() {
                 [UINT8, layer_list_to_mask(mapping['layers'])],
                 [UINT8, (mapping['sticky'] ? STICKY_FLAG : 0)
                     | (mapping['tap'] ? TAP_FLAG : 0)
-                    | (mapping['hold'] ? HOLD_FLAG : 0)],
+                    | (mapping['hold'] ? HOLD_FLAG : 0)
+                    | (mapping['double_tap'] ? DOUBLE_TAP_FLAG : 0)],
                 [UINT8, ((mapping['target_port'] & 0x0F) << 4) | (mapping['source_port'] & 0x0F)],
             ]);
         }
@@ -764,6 +769,11 @@ function set_ui_state() {
         // set it to false to preserve previous behavior.
         config['normalize_gamepad_inputs'] = false;
     }
+    if (config['version'] < 19) {
+        for (const mapping of config['mappings']) {
+            mapping['double_tap'] = false;
+        }
+    }
     if (config['version'] < CONFIG_VERSION) {
         config['version'] = CONFIG_VERSION;
     }
@@ -800,6 +810,9 @@ function add_mapping(mapping) {
     const hold_checkbox = clone.querySelector(".hold_checkbox");
     hold_checkbox.checked = mapping['hold'];
     hold_checkbox.addEventListener("change", hold_onclick(mapping, hold_checkbox));
+    const double_tap_checkbox = clone.querySelector(".double_tap_checkbox");
+    double_tap_checkbox.checked = mapping['double_tap'];
+    double_tap_checkbox.addEventListener("change", double_tap_onclick(mapping, double_tap_checkbox));
     const scaling_input = clone.querySelector(".scaling_input");
     scaling_input.value = mapping['scaling'] / 1000;
     scaling_input.addEventListener("input", scaling_onchange(mapping, scaling_input));
@@ -989,7 +1002,7 @@ function add_crc(data) {
 }
 
 function check_json_version(config_version) {
-    if (!([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(config_version))) {
+    if (!([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].includes(config_version))) {
         throw new Error("Incompatible version.");
     }
 }
@@ -1005,7 +1018,7 @@ async function check_device_version() {
     // device because it could be version X, ignore our GET_CONFIG call with version Y and
     // just happen to have Y at the right place in the buffer from some previous call done
     // by some other software.
-    for (const version of [CONFIG_VERSION, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]) {
+    for (const version of [CONFIG_VERSION, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]) {
         await send_feature_command(GET_CONFIG, [], version);
         const [received_version] = await read_config_feature([UINT8]);
         if (received_version == version) {
@@ -1053,6 +1066,12 @@ function tap_onclick(mapping, element) {
 function hold_onclick(mapping, element) {
     return function () {
         mapping['hold'] = element.checked;
+    };
+}
+
+function double_tap_onclick(mapping, element) {
+    return function () {
+        mapping['double_tap'] = element.checked;
     };
 }
 
@@ -1188,6 +1207,7 @@ function add_empty_mapping(source_usage = '0x00000000') {
         'sticky': false,
         'tap': false,
         'hold': false,
+        'double_tap': false,
         'scaling': DEFAULT_SCALING,
         'source_port': 0,
         'target_port': 0,
@@ -1577,17 +1597,21 @@ function set_forced_flags(mapping, mapping_container) {
     mapping_container.querySelector(".sticky_checkbox").disabled = false;
     mapping_container.querySelector(".tap_checkbox").disabled = false;
     mapping_container.querySelector(".hold_checkbox").disabled = false;
+    mapping_container.querySelector(".double_tap_checkbox").disabled = false;
     const usage_int = parseInt(mapping['source_usage'], 16);
     if (((usage_int & 0xFFFF0000) >>> 0) == EXPR_USAGE_PAGE) {
         mapping_container.querySelector(".sticky_checkbox").checked = false;
         mapping_container.querySelector(".tap_checkbox").checked = false;
         mapping_container.querySelector(".hold_checkbox").checked = false;
+        mapping_container.querySelector(".double_tap_checkbox").checked = false;
         mapping_container.querySelector(".sticky_checkbox").disabled = true;
         mapping_container.querySelector(".tap_checkbox").disabled = true;
         mapping_container.querySelector(".hold_checkbox").disabled = true;
+        mapping_container.querySelector(".double_tap_checkbox").disabled = true;
         mapping['sticky'] = false;
         mapping['tap'] = false;
         mapping['hold'] = false;
+        mapping['double_tap'] = false;
     }
 }
 

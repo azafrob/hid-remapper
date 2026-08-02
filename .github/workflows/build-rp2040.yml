@@ -18,6 +18,11 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib srecord
+      - name: Test press modes
+        run: |
+          c++ -std=c++17 -Isrc tests/press_modes_test.cc -o /tmp/hid-remapper-press-modes-test
+          /tmp/hid-remapper-press-modes-test
+        working-directory: ./firmware
       - name: Build
         run: |
           mkdir build

@@ -104,7 +104,7 @@ When fetching the currently active layers with `layer_state` (and, similarly, `s
 layer_state 0x02 bitwise_and not not 0x00090001 input_state_binary mul
 ```
 
-Currently, the tap-hold and the sticky logic is only triggered for usages that are an input in a mapping with those flags set. Therefore if you want to make use of those states in an expression, you have to add another dummy mapping with the button in question set as input and `Nothing` set as output, with the appropriate tap/hold/sticky flag set.
+Currently, the tap-hold, double-tap, and sticky logic is only triggered for usages that are an input in a mapping with those flags set. Therefore if you want to make use of those states in an expression, you have to add another dummy mapping with the button in question set as input and `Nothing` set as output, with the appropriate tap/hold/double-tap/sticky flag set.
 
 When you fetch the state of an input in an expression that is used as an input in a mapping, that input is considered to be mapped on the layers the mapping is active on for the purpose of unmapped inputs passthrough.
 
@@ -156,6 +156,7 @@ Here's a list of all operations that can be used in an expression. Each operatio
 | `sticky_state` | _usage_ | _sticky\_state(usage)_ | Bit mask of layers on which given usage is in sticky state. |
 | `tap_state` | _usage_ | _tap\_state(usage)_ | 1 if input is in tap state, 0 otherwise. |
 | `hold_state` | _usage_ | _hold\_state(usage)_ | 1 if input is in hold state, 0 otherwise. |
+| `double_tap_state` | _usage_ | _double\_tap\_state(usage)_ | 1 for the iteration in which the second short press completes a double-tap, 0 otherwise. |
 | `port` | _port number_ | | Sets the value of the port register that determines which input state is fetched by `input_state` etc. Defaults to 0 at the beginning of each mapping engine iteration, which means "all ports". |
 | `plugged_in` | | plugged-in state | 1 if something is plugged into the currently selected port or if selected port is 0, 0 otherwise. |
 | `deadzone` | _x_, _y_, _deadzone\_radius_ | _new\_x_, _new\_y_ | Applies a radial deadzone to stick inputs.

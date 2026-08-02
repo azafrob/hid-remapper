@@ -22,6 +22,7 @@
 const uint8_t MAPPING_FLAG_STICKY = 1 << 0;
 const uint8_t MAPPING_FLAG_TAP = 1 << 1;
 const uint8_t MAPPING_FLAG_HOLD = 1 << 2;
+const uint8_t MAPPING_FLAG_DOUBLE_TAP = 1 << 3;
 
 const uint8_t V_RESOLUTION_BITMASK = (1 << 0);
 const uint8_t H_RESOLUTION_BITMASK = (1 << 2);
@@ -58,8 +59,6 @@ std::unordered_map<uint16_t, std::unordered_map<uint8_t, std::vector<int32_t*>>>
 std::unordered_map<uint16_t, std::unordered_map<uint8_t, std::vector<usage_def_t>>> rollover_usages;          // dev_addr+interface -> report_id -> usage_def vector
 
 std::vector<sticky_usage_t> sticky_usages;
-std::vector<tap_hold_sticky_usage_t> tap_sticky_usages;
-std::vector<tap_hold_sticky_usage_t> hold_sticky_usages;
 std::vector<tap_hold_usage_t> tap_hold_usages;
 
 std::vector<usage_usage_def_t> our_array_range_usages;
@@ -222,6 +221,7 @@ bool is_expr_valid(uint8_t expr) {
             case Op::STICKY_STATE:
             case Op::TAP_STATE:
             case Op::HOLD_STATE:
+            case Op::DOUBLE_TAP_STATE:
             case Op::BITWISE_NOT:
             case Op::PREV_INPUT_STATE:
             case Op::PREV_INPUT_STATE_BINARY:
@@ -379,11 +379,16 @@ inline uint8_t* get_sticky_state_ptr(uint32_t usage, uint8_t hub_port, bool assi
 }
 
 void set_mapping_from_config() {
+    struct sticky_masks_t {
+        uint8_t normal = 0;
+        uint8_t tap = 0;
+        uint8_t hold = 0;
+        uint8_t double_tap = 0;
+    };
+
     std::unordered_map<uint64_t, std::vector<map_source_t>> reverse_mapping_map;  // hub_port+target -> sources list
-    std::unordered_map<uint64_t, uint8_t> sticky_usage_map;
-    std::unordered_map<uint64_t, uint8_t> tap_sticky_usage_map;
-    std::unordered_map<uint64_t, uint8_t> hold_sticky_usage_map;
-    std::unordered_set<uint64_t> tap_hold_usage_set;
+    std::unordered_map<uint64_t, sticky_masks_t> sticky_usage_map;
+    std::unordered_map<uint64_t, bool> tap_hold_usage_map;
     std::unordered_map<uint32_t, uint8_t> mapped_on_layers;  // usage -> layer mask
 
     validate_expressions();
@@ -442,6 +447,7 @@ void set_mapping_from_config() {
                 .sticky = (mapping.flags & MAPPING_FLAG_STICKY) != 0,
                 .tap = (mapping.flags & MAPPING_FLAG_TAP) != 0,
                 .hold = (mapping.flags & MAPPING_FLAG_HOLD) != 0,
+                .double_tap = (mapping.flags & MAPPING_FLAG_DOUBLE_TAP) != 0,
                 .orig_source_port = orig_source_port,
                 .layer_mask = layer_mask,
                 .input_state = get_state_ptr(mapping.source_usage, source_port),
@@ -473,20 +479,27 @@ void set_mapping_from_config() {
         }
         mapped_on_layers[mapping.source_usage] |= layer_mask;  // usage mapped on any hub_port is considered to be mapped
         if ((mapping.flags & MAPPING_FLAG_STICKY) != 0) {
+            auto& sticky_masks = sticky_usage_map[((uint64_t) source_port << 32) | mapping.source_usage];
             if (mapping.flags & MAPPING_FLAG_TAP) {
-                tap_sticky_usage_map[((uint64_t) source_port << 32) | mapping.source_usage] |= layer_mask;
+                sticky_masks.tap |= layer_mask;
             }
             if (mapping.flags & MAPPING_FLAG_HOLD) {
-                hold_sticky_usage_map[((uint64_t) source_port << 32) | mapping.source_usage] |= layer_mask;
+                sticky_masks.hold |= layer_mask;
+            }
+            if (mapping.flags & MAPPING_FLAG_DOUBLE_TAP) {
+                sticky_masks.double_tap |= layer_mask;
             }
             if (((mapping.flags & MAPPING_FLAG_TAP) == 0) &&
-                ((mapping.flags & MAPPING_FLAG_HOLD) == 0)) {
-                sticky_usage_map[((uint64_t) source_port << 32) | mapping.source_usage] |= layer_mask;
+                ((mapping.flags & MAPPING_FLAG_HOLD) == 0) &&
+                ((mapping.flags & MAPPING_FLAG_DOUBLE_TAP) == 0)) {
+                sticky_masks.normal |= layer_mask;
             }
         }
         if (((mapping.flags & MAPPING_FLAG_TAP) != 0) ||
-            ((mapping.flags & MAPPING_FLAG_HOLD) != 0)) {
-            tap_hold_usage_set.insert(((uint64_t) source_port << 32) | mapping.source_usage);
+            ((mapping.flags & MAPPING_FLAG_HOLD) != 0) ||
+            ((mapping.flags & MAPPING_FLAG_DOUBLE_TAP) != 0)) {
+            uint64_t key = ((uint64_t) source_port << 32) | mapping.source_usage;
+            tap_hold_usage_map[key] = tap_hold_usage_map[key] || ((mapping.flags & MAPPING_FLAG_DOUBLE_TAP) != 0);
         }
     }
 
@@ -505,47 +518,25 @@ void set_mapping_from_config() {
 
     sticky_usages.clear();
     tap_hold_usages.clear();
-    tap_sticky_usages.clear();
-    hold_sticky_usages.clear();
 
-    for (auto const& [hub_port_usage, layer_mask] : sticky_usage_map) {
+    for (auto const& [hub_port_usage, sticky_masks] : sticky_usage_map) {
         uint32_t usage = hub_port_usage & 0xFFFFFFFF;
         uint8_t hub_port = hub_port_usage >> 32;
         int32_t* state_ptr = get_state_ptr(usage, hub_port);
         if (state_ptr != NULL) {
             sticky_usages.push_back((sticky_usage_t){
                 .input_state = state_ptr,
-                .sticky_state = get_sticky_state_ptr(usage, hub_port),
-                .layer_mask = layer_mask,
-            });
-        }
-    }
-
-    for (auto const& [hub_port_usage, layer_mask] : tap_sticky_usage_map) {
-        uint32_t usage = hub_port_usage & 0xFFFFFFFF;
-        uint8_t hub_port = hub_port_usage >> 32;
-        if (get_state_ptr(usage, hub_port) != NULL) {
-            tap_sticky_usages.push_back((tap_hold_sticky_usage_t){
-                .layer_mask = layer_mask,
                 .tap_hold_state = get_tap_hold_state_ptr(usage, hub_port),
                 .sticky_state = get_sticky_state_ptr(usage, hub_port),
+                .layer_mask = sticky_masks.normal,
+                .tap_layer_mask = sticky_masks.tap,
+                .hold_layer_mask = sticky_masks.hold,
+                .double_tap_layer_mask = sticky_masks.double_tap,
             });
         }
     }
 
-    for (auto const& [hub_port_usage, layer_mask] : hold_sticky_usage_map) {
-        uint32_t usage = hub_port_usage & 0xFFFFFFFF;
-        uint8_t hub_port = hub_port_usage >> 32;
-        if (get_state_ptr(usage, hub_port) != NULL) {
-            hold_sticky_usages.push_back((tap_hold_sticky_usage_t){
-                .layer_mask = layer_mask,
-                .tap_hold_state = get_tap_hold_state_ptr(usage, hub_port),
-                .sticky_state = get_sticky_state_ptr(usage, hub_port),
-            });
-        }
-    }
-
-    for (auto const hub_port_usage : tap_hold_usage_set) {
+    for (auto const& [hub_port_usage, double_tap_enabled] : tap_hold_usage_map) {
         uint32_t usage = hub_port_usage & 0xFFFFFFFF;
         uint8_t hub_port = hub_port_usage >> 32;
         int32_t* state_ptr = get_state_ptr(usage, hub_port);
@@ -553,6 +544,7 @@ void set_mapping_from_config() {
             tap_hold_usages.push_back((tap_hold_usage_t){
                 .input_state = state_ptr,
                 .tap_hold_state = get_tap_hold_state_ptr(usage, hub_port),
+                .double_tap_enabled = double_tap_enabled,
             });
         }
     }
@@ -616,7 +608,7 @@ void set_mapping_from_config() {
             // and a default of zero is not good, but the proper way to solve this would be
             // to not execute mappings with unplugged sources.
             for (auto const& source : sources) {
-                if (!source.sticky && !source.tap && !source.hold && (source.scaling == 1000)) {
+                if (!source.sticky && !source.tap && !source.hold && !source.double_tap && (source.scaling == 1000)) {
                     *(source.input_state) = rev_map.default_value;
                 }
             }
@@ -627,7 +619,7 @@ void set_mapping_from_config() {
             (target == (DIGIPOT_USAGE_PAGE | 3))) {
             rev_map.default_value = 128;
             for (auto const& source : sources) {
-                if (!source.sticky && !source.tap && !source.hold && (source.scaling == 1000)) {
+                if (!source.sticky && !source.tap && !source.hold && !source.double_tap && (source.scaling == 1000)) {
                     *(source.input_state) = 128;
                 }
             }
@@ -743,6 +735,28 @@ static uint8_t dpad_table[16] = { 8, 6, 2, 8, 0, 7, 1, 0, 4, 5, 3, 4, 8, 6, 2, 8
 static inline uint8_t dpad(bool left, bool right, bool up, bool down) {
     uint8_t index = left | (right << 1) | (up << 2) | (down << 3);
     return dpad_table[index];
+}
+
+inline bool has_press_mode(const map_source_t& map_source) {
+    return map_source.tap || map_source.hold || map_source.double_tap;
+}
+
+inline bool map_source_active(const map_source_t& map_source) {
+    if (!has_press_mode(map_source)) {
+        return *map_source.input_state != 0;
+    }
+    return (map_source.tap && map_source.tap_hold_state->tap) ||
+           (map_source.hold && map_source.tap_hold_state->hold) ||
+           (map_source.double_tap && map_source.tap_hold_state->double_tap);
+}
+
+inline bool map_source_event(const map_source_t& map_source) {
+    if (!has_press_mode(map_source)) {
+        return (*(map_source.input_state + PREV_STATE_OFFSET) == 0) && (*map_source.input_state != 0);
+    }
+    return (map_source.tap && map_source.tap_hold_state->tap) ||
+           (map_source.hold && map_source.tap_hold_state->hold && !map_source.tap_hold_state->prev_hold) ||
+           (map_source.double_tap && map_source.tap_hold_state->double_tap);
 }
 
 int32_t eval_expr(uint8_t expr, uint64_t now, bool auto_repeat) {
@@ -861,6 +875,14 @@ int32_t eval_expr(uint8_t expr, uint64_t now, bool auto_repeat) {
                 }
                 if (elem.tap_hold_state_ptr != NULL) {
                     stack[ptr] = elem.tap_hold_state_ptr->hold * 1000;
+                }
+                break;
+            case Op::DOUBLE_TAP_STATE:
+                if (elem.tap_hold_state_ptr == NULL) {
+                    elem.tap_hold_state_ptr = get_tap_hold_state_ptr(stack[ptr], port_register, true);
+                }
+                if (elem.tap_hold_state_ptr != NULL) {
+                    stack[ptr] = elem.tap_hold_state_ptr->double_tap * 1000;
                 }
                 break;
             case Op::BITWISE_OR:
@@ -1097,35 +1119,40 @@ void process_mapping(bool auto_repeat) {
 
     for (auto& tap_hold : tap_hold_usages) {
         if ((*tap_hold.input_state != 0) && (*(tap_hold.input_state + PREV_STATE_OFFSET) == 0)) {
-            tap_hold.pressed_at = now;
+            tap_hold.double_tap_tracker.pressed_at = now;
         }
         tap_hold.tap_hold_state->tap =
             (*tap_hold.input_state == 0) && (*(tap_hold.input_state + PREV_STATE_OFFSET) != 0) &&
-            (now - tap_hold.pressed_at < tap_hold_threshold);
+            (now - tap_hold.double_tap_tracker.pressed_at < tap_hold_threshold);
         tap_hold.tap_hold_state->prev_hold = tap_hold.tap_hold_state->hold;
         tap_hold.tap_hold_state->hold =
             (*tap_hold.input_state != 0) &&
-            (now - tap_hold.pressed_at >= tap_hold_threshold);
+            (now - tap_hold.double_tap_tracker.pressed_at >= tap_hold_threshold);
+        tap_hold.tap_hold_state->double_tap = update_double_tap(
+            tap_hold.double_tap_tracker,
+            *tap_hold.input_state != 0,
+            *(tap_hold.input_state + PREV_STATE_OFFSET) != 0,
+            now,
+            tap_hold_threshold,
+            tap_hold.double_tap_enabled);
     }
 
     for (auto const& sticky : sticky_usages) {
+        uint8_t toggle_mask = 0;
         if ((layer_state_mask & sticky.layer_mask) &&
             ((*(sticky.input_state + PREV_STATE_OFFSET) == 0) && (*sticky.input_state != 0))) {
-            *sticky.sticky_state ^= (layer_state_mask & sticky.layer_mask);
+            toggle_mask |= sticky.layer_mask;
         }
-    }
-
-    for (auto& tap_sticky : tap_sticky_usages) {
-        if ((layer_state_mask & tap_sticky.layer_mask) && tap_sticky.tap_hold_state->tap) {
-            *tap_sticky.sticky_state ^= (layer_state_mask & tap_sticky.layer_mask);
+        if (sticky.tap_hold_state->tap) {
+            toggle_mask |= sticky.tap_layer_mask;
         }
-    }
-
-    for (auto& hold_sticky : hold_sticky_usages) {
-        if ((layer_state_mask & hold_sticky.layer_mask) &&
-            hold_sticky.tap_hold_state->hold && !hold_sticky.tap_hold_state->prev_hold) {
-            *hold_sticky.sticky_state ^= (layer_state_mask & hold_sticky.layer_mask);
+        if (sticky.tap_hold_state->hold && !sticky.tap_hold_state->prev_hold) {
+            toggle_mask |= sticky.hold_layer_mask;
         }
+        if (sticky.tap_hold_state->double_tap) {
+            toggle_mask |= sticky.double_tap_layer_mask;
+        }
+        *sticky.sticky_state ^= toggle_mask & layer_state_mask;
     }
 
     uint8_t new_layer_state_mask = 0;
@@ -1133,19 +1160,14 @@ void process_mapping(bool auto_repeat) {
         uint16_t i = rev_map.target & 0xFFFF;
         for (auto const& map_source : rev_map.sources) {
             if (!map_source.sticky) {
-                if ((map_source.layer_mask & layer_state_mask) &&
-                    (map_source.hold
-                            ? map_source.tap_hold_state->hold
-                            : *map_source.input_state)) {
+                if ((map_source.layer_mask & layer_state_mask) && map_source_active(map_source)) {
                     new_layer_state_mask |= 1 << i;
                 }
             } else {  // is sticky
                 // This part is responsible for deactivating a layer if it was activated
                 // by a sticky mapping and the user pressed the button again.
                 // There must be a better way of handling this.
-                if (((!map_source.tap && !map_source.hold && (*(map_source.input_state + PREV_STATE_OFFSET) == 0) && (*map_source.input_state != 0)) ||
-                        (map_source.tap && map_source.tap_hold_state->tap) ||
-                        (map_source.hold && map_source.tap_hold_state->hold && !map_source.tap_hold_state->prev_hold)) &&
+                if (map_source_event(map_source) &&
                     (*map_source.sticky_state & map_source.layer_mask) &&
                     (layer_state_mask & (1 << i))) {
                     *map_source.sticky_state &= ~map_source.layer_mask;
@@ -1189,9 +1211,7 @@ void process_mapping(bool auto_repeat) {
         }
         for (auto const& map_source : rev_map.sources) {
             if ((layer_state_mask & map_source.layer_mask) &&
-                ((!map_source.tap && !map_source.hold && (*(map_source.input_state + PREV_STATE_OFFSET) == 0) && (*map_source.input_state != 0)) ||
-                    (map_source.hold && map_source.tap_hold_state->hold && !map_source.tap_hold_state->prev_hold) ||
-                    (map_source.tap && map_source.tap_hold_state->tap))) {
+                map_source_event(map_source)) {
                 my_mutex_enter(MutexId::MACROS);
                 for (auto const& usages : macros[macro]) {
                     macro_queue.push((macro_entry_t){ duration_left : macro_entry_duration, items : usages });
@@ -1225,9 +1245,13 @@ void process_mapping(bool auto_repeat) {
                         value = !!(*map_source.sticky_state & map_source.layer_mask) * map_source.scaling;
                     } else {
                         if (layer_state_mask & map_source.layer_mask) {
-                            value = map_source.hold ? map_source.tap_hold_state->hold : *map_source.input_state;
-                            if (map_source.is_binary) {
-                                value = !!value;
+                            if (has_press_mode(map_source)) {
+                                value = map_source_active(map_source) ? 1 : 0;
+                            } else {
+                                value = *map_source.input_state;
+                                if (map_source.is_binary) {
+                                    value = !!value;
+                                }
                             }
                             value *= map_source.scaling;
                             if (((map_source.usage & 0xFFFF0000) == EXPR_USAGE_PAGE) ||
@@ -1258,11 +1282,10 @@ void process_mapping(bool auto_repeat) {
                     }
                 } else {
                     if ((layer_state_mask & map_source.layer_mask)) {
-                        if ((map_source.tap && map_source.tap_hold_state->tap) ||
-                            (map_source.hold && map_source.tap_hold_state->hold)) {
+                        if (has_press_mode(map_source) && map_source_active(map_source)) {
                             value += 1 * map_source.scaling / 1000 - rev_map.default_value;
                         }
-                        if (!map_source.tap && !map_source.hold) {
+                        if (!has_press_mode(map_source)) {
                             if (map_source.is_relative && !register_target) {
                                 if (*map_source.input_state * map_source.scaling > 0) {
                                     value += 1;
@@ -2033,6 +2056,13 @@ void reset_state() {
     accumulated.clear();
     layer_state_mask = 1;
     frame_counter = 0;
+    for (auto& tap_hold : tap_hold_usages) {
+        tap_hold.double_tap_tracker = double_tap_tracker_t{};
+        tap_hold.tap_hold_state->tap = false;
+        tap_hold.tap_hold_state->hold = false;
+        tap_hold.tap_hold_state->prev_hold = false;
+        tap_hold.tap_hold_state->double_tap = false;
+    }
 }
 
 void set_monitor_enabled(bool enabled) {

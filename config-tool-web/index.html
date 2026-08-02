@@ -57,7 +57,7 @@
                             <div class="col-3">
                                 <div class="d-flex align-items-end">
                                     <div class="flex-fill text-center"><a href="#" id="layer-column-header" class="text-decoration-none text-reset d-block">Layer</a></div>
-                                    <div class="text-start pt-1" style="writing-mode: vertical-rl; transform: rotate(180deg); line-height: 1.2em;">Sticky<br>Tap<br>Hold</div>
+                                    <div class="text-start pt-1" style="writing-mode: vertical-rl; transform: rotate(180deg); line-height: 1.2em;">Sticky<br>Tap<br>Hold<br>Double-tap</div>
                                 </div>
                             </div>
                             <div class="col-2 text-center">Scaling</div>
@@ -128,7 +128,7 @@
                 </div>
                 <div class="row mt-3">
                     <div class="col-4 text-end">
-                        <label for="tap_hold_threshold_input" class="col-form-label">Tap-hold threshold</label>
+                        <label for="tap_hold_threshold_input" class="col-form-label">Tap/hold/double-tap threshold</label>
                     </div>
                     <div class="col-auto">
                         <div class="input-group">
@@ -399,6 +399,10 @@
                         <div class="col-auto" title="Hold">
                             <input class="form-check-input hold_checkbox" type="checkbox" value="">
                             <br><span class="text-muted small">H</span>
+                        </div>
+                        <div class="col-auto" title="Double-tap">
+                            <input class="form-check-input double_tap_checkbox" type="checkbox" value="">
+                            <br><span class="text-muted small">D</span>
                         </div>
                     </div>
                 </div>

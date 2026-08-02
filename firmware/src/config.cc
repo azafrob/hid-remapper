@@ -10,7 +10,7 @@
 #include "platform.h"
 #include "remapper.h"
 
-const uint8_t CONFIG_VERSION = 18;
+const uint8_t CONFIG_VERSION = 19;
 
 const uint8_t CONFIG_FLAG_UNMAPPED_PASSTHROUGH = 0x01;
 const uint8_t CONFIG_FLAG_UNMAPPED_PASSTHROUGH_MASK = 0b00001111;
@@ -606,6 +606,8 @@ void load_config(const uint8_t* persisted_config) {
     // v15 is same as v14, it just introduces some new expression ops
     // v16 is same as v15, it just introduces a new expression op
     // v17 is same as v16, it introduces new expression ops and GET_FEATURE retry behavior
+    // v18 is same as v17, it introduces normalized gamepad inputs
+    // v19 is same as v18, it introduces the double-tap mapping flag
 
     if ((version == 13) ||
         (version == 14) ||
@@ -616,7 +618,7 @@ void load_config(const uint8_t* persisted_config) {
         return;
     }
 
-    persist_config_v18_t* config = (persist_config_v18_t*) persisted_config;
+    persist_config_v19_t* config = (persist_config_v19_t*) persisted_config;
     unmapped_passthrough_layer_mask = config->unmapped_passthrough_layer_mask;
     ignore_auth_dev_inputs = config->flags & (1 << CONFIG_FLAG_IGNORE_AUTH_DEV_INPUTS_BIT);
     gpio_output_mode = !!(config->flags & (1 << CONFIG_FLAG_GPIO_OUTPUT_MODE_BIT));
@@ -630,12 +632,12 @@ void load_config(const uint8_t* persisted_config) {
         our_descriptor_number = 0;
     }
     macro_entry_duration = config->macro_entry_duration;
-    mapping_config11_t* buffer_mappings = (mapping_config11_t*) (persisted_config + sizeof(persist_config_v18_t));
+    mapping_config11_t* buffer_mappings = (mapping_config11_t*) (persisted_config + sizeof(persist_config_v19_t));
     for (uint32_t i = 0; i < config->mapping_count; i++) {
         config_mappings.push_back(buffer_mappings[i]);
     }
 
-    const uint8_t* macros_config_ptr = (persisted_config + sizeof(persist_config_v18_t) + config->mapping_count * sizeof(mapping_config11_t));
+    const uint8_t* macros_config_ptr = (persisted_config + sizeof(persist_config_v19_t) + config->mapping_count * sizeof(mapping_config11_t));
     my_mutex_enter(MutexId::MACROS);
     for (int i = 0; i < NMACROS; i++) {
         macros[i].clear();
